@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
-import { scanSessionsTable, scannedRepositoriesTable } from '../db/schema';
+import { scanSessionsTable, scannedRepositoriesTable, usersTable } from '../db/schema';
 import { type GitHubScanInput } from '../schema';
 import { scanGitHubRepositories } from '../handlers/scan_github_repositories';
 import { eq } from 'drizzle-orm';
@@ -89,7 +89,18 @@ describe('scanGitHubRepositories', () => {
   });
 
   it('should scan repositories and return results', async () => {
-    const result = await scanGitHubRepositories(testInput);
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
+    const result = await scanGitHubRepositories(userId, testInput);
 
     expect(result.username).toEqual('testuser');
     expect(result.totalRepositories).toEqual(2);
@@ -109,7 +120,18 @@ describe('scanGitHubRepositories', () => {
   });
 
   it('should save scan session to database', async () => {
-    const result = await scanGitHubRepositories(testInput);
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
+    const result = await scanGitHubRepositories(userId, testInput);
 
     const sessions = await db.select()
       .from(scanSessionsTable)
@@ -123,7 +145,18 @@ describe('scanGitHubRepositories', () => {
   });
 
   it('should save repository data to database', async () => {
-    await scanGitHubRepositories(testInput);
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
+    await scanGitHubRepositories(userId, testInput);
 
     const repositories = await db.select()
       .from(scannedRepositoriesTable)
@@ -139,7 +172,18 @@ describe('scanGitHubRepositories', () => {
   });
 
   it('should calculate quality scores correctly', async () => {
-    const result = await scanGitHubRepositories(testInput);
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
+    const result = await scanGitHubRepositories(userId, testInput);
 
     const awesomeProject = result.repositories.find(r => r.name === 'awesome-project');
     expect(awesomeProject).toBeDefined();
@@ -170,7 +214,18 @@ describe('scanGitHubRepositories', () => {
   });
 
   it('should handle repositories without README or LICENSE', async () => {
-    const result = await scanGitHubRepositories(testInput);
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
+    const result = await scanGitHubRepositories(userId, testInput);
 
     const simpleRepo = result.repositories.find(r => r.name === 'simple-repo');
     expect(simpleRepo).toBeDefined();
@@ -199,7 +254,18 @@ describe('scanGitHubRepositories', () => {
     
     globalThis.fetch = mockErrorFetch as any;
 
-    await expect(scanGitHubRepositories(testInput)).rejects.toThrow(/API errors/i);
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
+    await expect(scanGitHubRepositories(userId, testInput)).rejects.toThrow(/API errors/i);
   });
 
   it('should handle empty repository list', async () => {
@@ -221,7 +287,18 @@ describe('scanGitHubRepositories', () => {
     
     globalThis.fetch = mockEmptyFetch as any;
 
-    const result = await scanGitHubRepositories(testInput);
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
+    const result = await scanGitHubRepositories(userId, testInput);
 
     expect(result.username).toEqual('testuser');
     expect(result.totalRepositories).toEqual(0);

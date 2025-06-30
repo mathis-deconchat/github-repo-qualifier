@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
-import { scanSessionsTable, scannedRepositoriesTable } from '../db/schema';
+import { scanSessionsTable, scannedRepositoriesTable, usersTable } from '../db/schema';
 import { getScanHistory } from '../handlers/get_scan_history';
 import { type RepositoryQualityScore } from '../schema';
 
@@ -28,14 +28,26 @@ describe('getScanHistory', () => {
   };
 
   it('should return empty array for user with no scan history', async () => {
-    const result = await getScanHistory('nonexistent_user');
+    const result = await getScanHistory(999); // Non-existent user ID
     expect(result).toEqual([]);
   });
 
   it('should return scan history for user with one session', async () => {
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
     // Create a scan session
     const sessionResult = await db.insert(scanSessionsTable)
       .values({
+        userId,
         username: 'testuser',
         totalRepositories: 2,
       })
@@ -72,7 +84,7 @@ describe('getScanHistory', () => {
       ])
       .execute();
 
-    const results = await getScanHistory('testuser');
+    const results = await getScanHistory(userId);
 
     expect(results).toHaveLength(1);
     expect(results[0].username).toBe('testuser');
@@ -99,12 +111,24 @@ describe('getScanHistory', () => {
   });
 
   it('should return multiple scan sessions ordered by most recent first', async () => {
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
     const now = new Date();
     const olderDate = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 1 day ago
 
     // Create older session first
     const olderSessionResult = await db.insert(scanSessionsTable)
       .values({
+        userId,
         username: 'testuser',
         totalRepositories: 1,
         scannedAt: olderDate,
@@ -115,6 +139,7 @@ describe('getScanHistory', () => {
     // Create newer session
     const newerSessionResult = await db.insert(scanSessionsTable)
       .values({
+        userId,
         username: 'testuser',
         totalRepositories: 1,
         scannedAt: now,
@@ -150,7 +175,7 @@ describe('getScanHistory', () => {
       ])
       .execute();
 
-    const results = await getScanHistory('testuser');
+    const results = await getScanHistory(userId);
 
     expect(results).toHaveLength(2);
     
@@ -163,15 +188,27 @@ describe('getScanHistory', () => {
   });
 
   it('should handle user with sessions but no repositories', async () => {
+    // Create a test user first
+    const userResult = await db.insert(usersTable)
+      .values({
+        email: 'test@example.com',
+        passwordHash: 'hashedpassword',
+      })
+      .returning()
+      .execute();
+
+    const userId = userResult[0].id;
+
     // Create session without repositories
     await db.insert(scanSessionsTable)
       .values({
+        userId,
         username: 'testuser',
         totalRepositories: 0,
       })
       .execute();
 
-    const results = await getScanHistory('testuser');
+    const results = await getScanHistory(userId);
 
     expect(results).toHaveLength(1);
     expect(results[0].username).toBe('testuser');

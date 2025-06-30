@@ -3,7 +3,7 @@ import { db } from '../db';
 import { scanSessionsTable, scannedRepositoriesTable } from '../db/schema';
 import { type GitHubScanInput, type GitHubScanResult, type GitHubRepositoryData, type RepositoryQualityScore } from '../schema';
 
-export async function scanGitHubRepositories(input: GitHubScanInput): Promise<GitHubScanResult> {
+export async function scanGitHubRepositories(userId: number, input: GitHubScanInput): Promise<GitHubScanResult> {
   try {
     // Fetch repositories from GitHub API
     const repositories = await fetchGitHubRepositories(input.username, input.personalAccessToken);
@@ -14,6 +14,7 @@ export async function scanGitHubRepositories(input: GitHubScanInput): Promise<Gi
     // Store scan session in database
     const sessionResult = await db.insert(scanSessionsTable)
       .values({
+        userId,
         username: input.username,
         totalRepositories: repositories.length,
       })

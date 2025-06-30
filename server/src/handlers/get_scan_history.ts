@@ -4,12 +4,12 @@ import { scanSessionsTable, scannedRepositoriesTable } from '../db/schema';
 import { type GitHubScanResult, type RepositoryQualityScore, type ScannedRepository as SchemaScannedRepository } from '../schema';
 import { eq, desc, inArray } from 'drizzle-orm';
 
-export async function getScanHistory(username: string): Promise<GitHubScanResult[]> {
+export async function getScanHistory(userId: number): Promise<GitHubScanResult[]> {
   try {
     // Get all scan sessions for the user, ordered by most recent first
     const sessions = await db.select()
       .from(scanSessionsTable)
-      .where(eq(scanSessionsTable.username, username))
+      .where(eq(scanSessionsTable.userId, userId))
       .orderBy(desc(scanSessionsTable.scannedAt))
       .execute();
 
