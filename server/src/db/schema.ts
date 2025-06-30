@@ -1,18 +1,17 @@
 
 import { serial, text, pgTable, timestamp, integer, boolean, jsonb } from 'drizzle-orm/pg-core';
 
-// Users table - stores user authentication information
+// Users table - stores user authentication data
 export const usersTable = pgTable('users', {
   id: serial('id').primaryKey(),
   email: text('email').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
+  hashedPassword: text('hashed_password').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-// Password reset tokens table - stores temporary reset tokens
-export const passwordResetTokensTable = pgTable('password_reset_tokens', {
+// Sessions table - stores user session data
+export const sessionsTable = pgTable('sessions', {
   id: serial('id').primaryKey(),
-  token: text('token').notNull().unique(),
   userId: integer('user_id').notNull().references(() => usersTable.id),
   expiresAt: timestamp('expires_at').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -45,8 +44,8 @@ export const scannedRepositoriesTable = pgTable('scanned_repositories', {
 // TypeScript types for the table schemas
 export type User = typeof usersTable.$inferSelect;
 export type NewUser = typeof usersTable.$inferInsert;
-export type PasswordResetToken = typeof passwordResetTokensTable.$inferSelect;
-export type NewPasswordResetToken = typeof passwordResetTokensTable.$inferInsert;
+export type Session = typeof sessionsTable.$inferSelect;
+export type NewSession = typeof sessionsTable.$inferInsert;
 export type ScanSession = typeof scanSessionsTable.$inferSelect;
 export type NewScanSession = typeof scanSessionsTable.$inferInsert;
 export type ScannedRepository = typeof scannedRepositoriesTable.$inferSelect;
@@ -55,7 +54,7 @@ export type NewScannedRepository = typeof scannedRepositoriesTable.$inferInsert;
 // Export all tables for relation queries
 export const tables = { 
   users: usersTable,
-  passwordResetTokens: passwordResetTokensTable,
+  sessions: sessionsTable,
   scanSessions: scanSessionsTable,
   scannedRepositories: scannedRepositoriesTable,
 };

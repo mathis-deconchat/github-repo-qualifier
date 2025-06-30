@@ -1,42 +1,21 @@
 
 import { z } from 'zod';
 
-// User authentication schemas
+// Auth schemas
 export const signupInputSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  email: z.string().email('Valid email is required'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
 });
 
 export type SignupInput = z.infer<typeof signupInputSchema>;
 
-export const signinInputSchema = z.object({
-  email: z.string().email('Invalid email address'),
+export const loginInputSchema = z.object({
+  email: z.string().email('Valid email is required'),
   password: z.string().min(1, 'Password is required'),
 });
 
-export type SigninInput = z.infer<typeof signinInputSchema>;
+export type LoginInput = z.infer<typeof loginInputSchema>;
 
-export const requestPasswordResetSchema = z.object({
-  email: z.string().email('Invalid email address'),
-});
-
-export type RequestPasswordResetInput = z.infer<typeof requestPasswordResetSchema>;
-
-export const resetPasswordSchema = z.object({
-  token: z.string().min(1, 'Reset token is required'),
-  newPassword: z.string().min(8, 'Password must be at least 8 characters'),
-});
-
-export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
-
-export const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, 'Current password is required'),
-  newPassword: z.string().min(8, 'Password must be at least 8 characters'),
-});
-
-export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
-
-// User schema
 export const userSchema = z.object({
   id: z.number(),
   email: z.string().email(),
@@ -44,14 +23,6 @@ export const userSchema = z.object({
 });
 
 export type User = z.infer<typeof userSchema>;
-
-// Authentication response schema
-export const authResponseSchema = z.object({
-  user: userSchema,
-  token: z.string(),
-});
-
-export type AuthResponse = z.infer<typeof authResponseSchema>;
 
 // GitHub scan input schema
 export const githubScanInputSchema = z.object({

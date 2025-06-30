@@ -1,13 +1,36 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
-import { scanSessionsTable, scannedRepositoriesTable, usersTable } from '../db/schema';
+import { scanSessionsTable, scannedRepositoriesTable } from '../db/schema';
 import { getScanHistory } from '../handlers/get_scan_history';
-import { type RepositoryQualityScore } from '../schema';
+import { signup } from '../handlers/auth';
+import { type RepositoryQualityScore, type SignupInput } from '../schema';
+
+const testUser1Input: SignupInput = {
+  email: 'test1@example.com',
+  password: 'testpassword123',
+};
+
+const testUser2Input: SignupInput = {
+  email: 'test2@example.com',
+  password: 'testpassword123',
+};
 
 describe('getScanHistory', () => {
-  beforeEach(createDB);
+  let user1Id: number;
+  let user2Id: number;
+
+  beforeEach(async () => {
+    await createDB();
+    
+    // Create test users
+    const signup1Result = await signup(testUser1Input);
+    user1Id = signup1Result.user.id;
+    
+    const signup2Result = await signup(testUser2Input);
+    user2Id = signup2Result.user.id;
+  });
+  
   afterEach(resetDB);
 
   const sampleQualityScore: RepositoryQualityScore = {
@@ -28,27 +51,16 @@ describe('getScanHistory', () => {
   };
 
   it('should return empty array for user with no scan history', async () => {
-    const result = await getScanHistory(999); // Non-existent user ID
+    const result = await getScanHistory(user1Id);
     expect(result).toEqual([]);
   });
 
   it('should return scan history for user with one session', async () => {
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
-      .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
-      })
-      .returning()
-      .execute();
-
-    const userId = userResult[0].id;
-
-    // Create a scan session
+    // Create a scan session for user1
     const sessionResult = await db.insert(scanSessionsTable)
       .values({
-        userId,
-        username: 'testuser',
+        userId: user1Id,
+        username: 'testuser1',
         totalRepositories: 2,
       })
       .returning()
@@ -63,7 +75,7 @@ describe('getScanHistory', () => {
           sessionId,
           name: 'repo1',
           description: 'First repository',
-          url: 'https://github.com/testuser/repo1',
+          url: 'https://github.com/testuser1/repo1',
           isPrivate: false,
           language: 'JavaScript',
           stars: 10,
@@ -74,7 +86,7 @@ describe('getScanHistory', () => {
           sessionId,
           name: 'repo2',
           description: null,
-          url: 'https://github.com/testuser/repo2',
+          url: 'https://github.com/testuser1/repo2',
           isPrivate: true,
           language: null,
           stars: 0,
@@ -84,10 +96,10 @@ describe('getScanHistory', () => {
       ])
       .execute();
 
-    const results = await getScanHistory(userId);
+    const results = await getScanHistory(user1Id);
 
     expect(results).toHaveLength(1);
-    expect(results[0].username).toBe('testuser');
+    expect(results[0].username).toBe('testuser1');
     expect(results[0].totalRepositories).toBe(2);
     expect(results[0].repositories).toHaveLength(2);
     expect(results[0].scannedAt).toBeInstanceOf(Date);
@@ -96,7 +108,7 @@ describe('getScanHistory', () => {
     const repo1 = results[0].repositories.find(r => r.name === 'repo1');
     expect(repo1).toBeDefined();
     expect(repo1!.description).toBe('First repository');
-    expect(repo1!.url).toBe('https://github.com/testuser/repo1');
+    expect(repo1!.url).toBe('https://github.com/testuser1/repo1');
     expect(repo1!.isPrivate).toBe(false);
     expect(repo1!.language).toBe('JavaScript');
     expect(repo1!.stars).toBe(10);
@@ -110,26 +122,77 @@ describe('getScanHistory', () => {
     expect(repo2!.language).toBe(null);
   });
 
-  it('should return multiple scan sessions ordered by most recent first', async () => {
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
+  it('should return only authenticated users scan history', async () => {
+    // Create scan session for user1
+    const session1Result = await db.insert(scanSessionsTable)
       .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
+        userId: user1Id,
+        username: 'testuser1',
+        totalRepositories: 1,
       })
       .returning()
       .execute();
 
-    const userId = userResult[0].id;
+    // Create scan session for user2
+    const session2Result = await db.insert(scanSessionsTable)
+      .values({
+        userId: user2Id,
+        username: 'testuser2',
+        totalRepositories: 1,
+      })
+      .returning()
+      .execute();
 
+    // Add repositories to both sessions
+    await db.insert(scannedRepositoriesTable)
+      .values([
+        {
+          sessionId: session1Result[0].id,
+          name: 'user1-repo',
+          description: 'User 1 repository',
+          url: 'https://github.com/testuser1/user1-repo',
+          isPrivate: false,
+          language: 'Python',
+          stars: 5,
+          forks: 2,
+          qualityScore: sampleQualityScore,
+        },
+        {
+          sessionId: session2Result[0].id,
+          name: 'user2-repo',
+          description: 'User 2 repository',
+          url: 'https://github.com/testuser2/user2-repo',
+          isPrivate: false,
+          language: 'TypeScript',
+          stars: 15,
+          forks: 8,
+          qualityScore: sampleQualityScore,
+        },
+      ])
+      .execute();
+
+    // User 1 should only see their own scans
+    const user1Results = await getScanHistory(user1Id);
+    expect(user1Results).toHaveLength(1);
+    expect(user1Results[0].username).toBe('testuser1');
+    expect(user1Results[0].repositories[0].name).toBe('user1-repo');
+
+    // User 2 should only see their own scans
+    const user2Results = await getScanHistory(user2Id);
+    expect(user2Results).toHaveLength(1);
+    expect(user2Results[0].username).toBe('testuser2');
+    expect(user2Results[0].repositories[0].name).toBe('user2-repo');
+  });
+
+  it('should return multiple scan sessions ordered by most recent first', async () => {
     const now = new Date();
     const olderDate = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 1 day ago
 
     // Create older session first
     const olderSessionResult = await db.insert(scanSessionsTable)
       .values({
-        userId,
-        username: 'testuser',
+        userId: user1Id,
+        username: 'testuser1',
         totalRepositories: 1,
         scannedAt: olderDate,
       })
@@ -139,8 +202,8 @@ describe('getScanHistory', () => {
     // Create newer session
     const newerSessionResult = await db.insert(scanSessionsTable)
       .values({
-        userId,
-        username: 'testuser',
+        userId: user1Id,
+        username: 'testuser1',
         totalRepositories: 1,
         scannedAt: now,
       })
@@ -154,7 +217,7 @@ describe('getScanHistory', () => {
           sessionId: olderSessionResult[0].id,
           name: 'old-repo',
           description: 'Old repository',
-          url: 'https://github.com/testuser/old-repo',
+          url: 'https://github.com/testuser1/old-repo',
           isPrivate: false,
           language: 'Python',
           stars: 5,
@@ -165,7 +228,7 @@ describe('getScanHistory', () => {
           sessionId: newerSessionResult[0].id,
           name: 'new-repo',
           description: 'New repository',
-          url: 'https://github.com/testuser/new-repo',
+          url: 'https://github.com/testuser1/new-repo',
           isPrivate: false,
           language: 'TypeScript',
           stars: 15,
@@ -175,7 +238,7 @@ describe('getScanHistory', () => {
       ])
       .execute();
 
-    const results = await getScanHistory(userId);
+    const results = await getScanHistory(user1Id);
 
     expect(results).toHaveLength(2);
     
@@ -188,30 +251,19 @@ describe('getScanHistory', () => {
   });
 
   it('should handle user with sessions but no repositories', async () => {
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
-      .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
-      })
-      .returning()
-      .execute();
-
-    const userId = userResult[0].id;
-
-    // Create session without repositories
+    // Create session without repositories for user1
     await db.insert(scanSessionsTable)
       .values({
-        userId,
-        username: 'testuser',
+        userId: user1Id,
+        username: 'testuser1',
         totalRepositories: 0,
       })
       .execute();
 
-    const results = await getScanHistory(userId);
+    const results = await getScanHistory(user1Id);
 
     expect(results).toHaveLength(1);
-    expect(results[0].username).toBe('testuser');
+    expect(results[0].username).toBe('testuser1');
     expect(results[0].totalRepositories).toBe(0);
     expect(results[0].repositories).toHaveLength(0);
   });

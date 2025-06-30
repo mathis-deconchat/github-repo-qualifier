@@ -1,9 +1,10 @@
 
+import { TRPCError } from '@trpc/server';
 import { db } from '../db';
 import { scanSessionsTable, scannedRepositoriesTable } from '../db/schema';
 import { type GitHubScanInput, type GitHubScanResult, type GitHubRepositoryData, type RepositoryQualityScore } from '../schema';
 
-export async function scanGitHubRepositories(userId: number, input: GitHubScanInput): Promise<GitHubScanResult> {
+export async function scanGitHubRepositories(input: GitHubScanInput, userId: number): Promise<GitHubScanResult> {
   try {
     // Fetch repositories from GitHub API
     const repositories = await fetchGitHubRepositories(input.username, input.personalAccessToken);
@@ -11,7 +12,7 @@ export async function scanGitHubRepositories(userId: number, input: GitHubScanIn
     // Analyze quality scores for each repository
     const analyzedRepositories = repositories.map(repo => analyzeRepositoryQuality(repo));
     
-    // Store scan session in database
+    // Store scan session in database with user ID
     const sessionResult = await db.insert(scanSessionsTable)
       .values({
         userId,
@@ -108,7 +109,25 @@ async function fetchGitHubRepositories(username: string, token?: string): Promis
   });
 
   if (!response.ok) {
-    throw new Error(`GitHub API request failed: ${response.status}`);
+    // Handle rate limiting specifically
+    if (response.status === 403 || response.status === 429) {
+      const rateLimitReset = response.headers.get('x-ratelimit-reset');
+      const retryAfter = response.headers.get('retry-after');
+      
+      throw new TRPCError({
+        code: 'TOO_MANY_REQUESTS',
+        message: 'GITHUB_RATE_LIMIT_EXCEEDED',
+        cause: {
+          rateLimitReset: rateLimitReset ? parseInt(rateLimitReset) : null,
+          retryAfter: retryAfter ? parseInt(retryAfter) : null,
+        },
+      });
+    }
+    
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `GitHub API request failed: ${response.status}`,
+    });
   }
 
   const data: any = await response.json();

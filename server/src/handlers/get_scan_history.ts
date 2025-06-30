@@ -6,7 +6,7 @@ import { eq, desc, inArray } from 'drizzle-orm';
 
 export async function getScanHistory(userId: number): Promise<GitHubScanResult[]> {
   try {
-    // Get all scan sessions for the user, ordered by most recent first
+    // Get all scan sessions for the authenticated user, ordered by most recent first
     const sessions = await db.select()
       .from(scanSessionsTable)
       .where(eq(scanSessionsTable.userId, userId))

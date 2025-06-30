@@ -1,15 +1,20 @@
-
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
-import { scanSessionsTable, scannedRepositoriesTable, usersTable } from '../db/schema';
-import { type GitHubScanInput } from '../schema';
+import { scanSessionsTable, scannedRepositoriesTable } from '../db/schema';
+import { type GitHubScanInput, type SignupInput } from '../schema';
 import { scanGitHubRepositories } from '../handlers/scan_github_repositories';
+import { signup } from '../handlers/auth';
 import { eq } from 'drizzle-orm';
 
 const testInput: GitHubScanInput = {
   username: 'testuser',
   personalAccessToken: 'test-token',
+};
+
+const testUserInput: SignupInput = {
+  email: 'test@example.com',
+  password: 'testpassword123',
 };
 
 // Mock fetch to avoid real API calls in tests
@@ -66,8 +71,14 @@ const mockGitHubResponse = {
 };
 
 describe('scanGitHubRepositories', () => {
+  let userId: number;
+
   beforeEach(async () => {
     await createDB();
+    
+    // Create a test user
+    const signupResult = await signup(testUserInput);
+    userId = signupResult.user.id;
     
     // Mock fetch for GitHub API
     const mockFetch = async (url: string | URL | Request, options?: RequestInit) => {
@@ -89,18 +100,7 @@ describe('scanGitHubRepositories', () => {
   });
 
   it('should scan repositories and return results', async () => {
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
-      .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
-      })
-      .returning()
-      .execute();
-
-    const userId = userResult[0].id;
-
-    const result = await scanGitHubRepositories(userId, testInput);
+    const result = await scanGitHubRepositories(testInput, userId);
 
     expect(result.username).toEqual('testuser');
     expect(result.totalRepositories).toEqual(2);
@@ -119,44 +119,23 @@ describe('scanGitHubRepositories', () => {
     expect(firstRepo.qualityScore.totalScore).toBeGreaterThan(0);
   });
 
-  it('should save scan session to database', async () => {
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
-      .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
-      })
-      .returning()
-      .execute();
-
-    const userId = userResult[0].id;
-
-    const result = await scanGitHubRepositories(userId, testInput);
+  it('should save scan session to database with user association', async () => {
+    const result = await scanGitHubRepositories(testInput, userId);
 
     const sessions = await db.select()
       .from(scanSessionsTable)
-      .where(eq(scanSessionsTable.username, 'testuser'))
+      .where(eq(scanSessionsTable.userId, userId))
       .execute();
 
     expect(sessions).toHaveLength(1);
     expect(sessions[0].username).toEqual('testuser');
+    expect(sessions[0].userId).toEqual(userId);
     expect(sessions[0].totalRepositories).toEqual(2);
     expect(sessions[0].scannedAt).toBeInstanceOf(Date);
   });
 
   it('should save repository data to database', async () => {
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
-      .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
-      })
-      .returning()
-      .execute();
-
-    const userId = userResult[0].id;
-
-    await scanGitHubRepositories(userId, testInput);
+    await scanGitHubRepositories(testInput, userId);
 
     const repositories = await db.select()
       .from(scannedRepositoriesTable)
@@ -172,18 +151,7 @@ describe('scanGitHubRepositories', () => {
   });
 
   it('should calculate quality scores correctly', async () => {
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
-      .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
-      })
-      .returning()
-      .execute();
-
-    const userId = userResult[0].id;
-
-    const result = await scanGitHubRepositories(userId, testInput);
+    const result = await scanGitHubRepositories(testInput, userId);
 
     const awesomeProject = result.repositories.find(r => r.name === 'awesome-project');
     expect(awesomeProject).toBeDefined();
@@ -214,18 +182,7 @@ describe('scanGitHubRepositories', () => {
   });
 
   it('should handle repositories without README or LICENSE', async () => {
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
-      .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
-      })
-      .returning()
-      .execute();
-
-    const userId = userResult[0].id;
-
-    const result = await scanGitHubRepositories(userId, testInput);
+    const result = await scanGitHubRepositories(testInput, userId);
 
     const simpleRepo = result.repositories.find(r => r.name === 'simple-repo');
     expect(simpleRepo).toBeDefined();
@@ -243,6 +200,23 @@ describe('scanGitHubRepositories', () => {
     expect(qualityScore.repositoryName).toBeGreaterThan(0);
   });
 
+  it('should handle rate limit errors', async () => {
+    // Mock rate limit error response
+    const mockRateLimitFetch = async () => {
+      return new Response('Rate limit exceeded', {
+        status: 403,
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-ratelimit-reset': '1234567890',
+        },
+      });
+    };
+    
+    globalThis.fetch = mockRateLimitFetch as any;
+
+    await expect(scanGitHubRepositories(testInput, userId)).rejects.toThrow(/GITHUB_RATE_LIMIT_EXCEEDED/);
+  });
+
   it('should handle API errors gracefully', async () => {
     // Mock API error response
     const mockErrorFetch = async () => {
@@ -254,18 +228,7 @@ describe('scanGitHubRepositories', () => {
     
     globalThis.fetch = mockErrorFetch as any;
 
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
-      .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
-      })
-      .returning()
-      .execute();
-
-    const userId = userResult[0].id;
-
-    await expect(scanGitHubRepositories(userId, testInput)).rejects.toThrow(/API errors/i);
+    await expect(scanGitHubRepositories(testInput, userId)).rejects.toThrow(/API errors/i);
   });
 
   it('should handle empty repository list', async () => {
@@ -287,18 +250,7 @@ describe('scanGitHubRepositories', () => {
     
     globalThis.fetch = mockEmptyFetch as any;
 
-    // Create a test user first
-    const userResult = await db.insert(usersTable)
-      .values({
-        email: 'test@example.com',
-        passwordHash: 'hashedpassword',
-      })
-      .returning()
-      .execute();
-
-    const userId = userResult[0].id;
-
-    const result = await scanGitHubRepositories(userId, testInput);
+    const result = await scanGitHubRepositories(testInput, userId);
 
     expect(result.username).toEqual('testuser');
     expect(result.totalRepositories).toEqual(0);
